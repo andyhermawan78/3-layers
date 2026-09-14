@@ -10,7 +10,7 @@ import { CompletionModal } from './components/CompletionModal';
 import { MainPage } from './components/MainPage';
 import { PromptContextModal } from './components/PromptContextModal';
 import { sounds } from './utils/audio';
-import { BookOpen, Info, ArrowLeft, BarChart3 } from 'lucide-react';
+import { Info, BarChart3 } from 'lucide-react';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<'main' | 'game'>('main');
@@ -46,32 +46,50 @@ export default function App() {
   } | null>(null);
 
   // Status message state
-  const [statusMessage, setStatusMessage] = useState<string>('Drag a strip into a layer to begin!');
+  const [statusMessage, setStatusMessage] = useState<string>('Drag or tap a strip into a layer to begin!');
   const [statusType, setStatusType] = useState<'neutral' | 'success' | 'error'>('neutral');
 
-  // Timer interval ref
+  // Interval & Timeout refs for safe cleanup
   const timerRef = useRef<number | null>(null);
+  const animTimeoutRef = useRef<number | null>(null);
+  const completionTimeoutRef = useRef<number | null>(null);
+
+  // Clear any pending animation timers
+  const clearPendingTimeouts = useCallback(() => {
+    if (animTimeoutRef.current) {
+      clearTimeout(animTimeoutRef.current);
+      animTimeoutRef.current = null;
+    }
+    if (completionTimeoutRef.current) {
+      clearTimeout(completionTimeoutRef.current);
+      completionTimeoutRef.current = null;
+    }
+  }, []);
 
   // Reset/Initialize Game for a specific topic
-  const loadTopicGame = useCallback((topic: Topic) => {
-    setActiveTopic(topic);
-    // Shuffle strips for replay value
-    const shuffled = [...topic.strips].sort(() => Math.random() - 0.5);
-    setBankStrips(shuffled);
-    setPlacedStrips([]);
-    setScore(0);
-    setMistakes(0);
-    setSeconds(0);
-    setIsGameActive(true);
-    setIsCompleted(false);
-    setDraggedStrip(null);
-    setSelectedStrip(null);
-    setDragOverLayer(null);
-    setAnimatingLayer(null);
-    setStatusMessage('Drag a sentence strip into its correct layer to begin!');
-    setStatusType('neutral');
-    setCurrentView('game');
-  }, []);
+  const loadTopicGame = useCallback(
+    (topic: Topic) => {
+      clearPendingTimeouts();
+      setActiveTopic(topic);
+      // Shuffle strips for replay value
+      const shuffled = [...topic.strips].sort(() => Math.random() - 0.5);
+      setBankStrips(shuffled);
+      setPlacedStrips([]);
+      setScore(0);
+      setMistakes(0);
+      setSeconds(0);
+      setIsGameActive(true);
+      setIsCompleted(false);
+      setDraggedStrip(null);
+      setSelectedStrip(null);
+      setDragOverLayer(null);
+      setAnimatingLayer(null);
+      setStatusMessage('Drag or tap a sentence strip into its matching layer!');
+      setStatusType('neutral');
+      setCurrentView('game');
+    },
+    [clearPendingTimeouts]
+  );
 
   const handleSelectTopic = (topic: Topic) => {
     loadTopicGame(topic);
@@ -88,8 +106,14 @@ export default function App() {
   };
 
   const handleBackToMenu = () => {
+    clearPendingTimeouts();
     setCurrentView('main');
     setIsGameActive(false);
+    setIsCompleted(false);
+    setSelectedStrip(null);
+    setDraggedStrip(null);
+    setDragOverLayer(null);
+    setAnimatingLayer(null);
   };
 
   // Timer effect
@@ -100,43 +124,62 @@ export default function App() {
       }, 1000);
     } else if (timerRef.current) {
       clearInterval(timerRef.current);
+      timerRef.current = null;
     }
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
     };
   }, [currentView, isGameActive, isCompleted]);
+
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      clearPendingTimeouts();
+    };
+  }, [clearPendingTimeouts]);
 
   // Trigger celebration confetti
   const launchCelebration = useCallback(() => {
     try {
       confetti({
-        particleCount: 100,
-        spread: 80,
+        particleCount: 80,
+        spread: 70,
         origin: { y: 0.6 }
       });
       setTimeout(() => {
-        confetti({
-          particleCount: 50,
-          angle: 60,
-          spread: 55,
-          origin: { x: 0 }
-        });
-        confetti({
-          particleCount: 50,
-          angle: 120,
-          spread: 55,
-          origin: { x: 1 }
-        });
+        try {
+          confetti({
+            particleCount: 40,
+            angle: 60,
+            spread: 55,
+            origin: { x: 0 }
+          });
+          confetti({
+            particleCount: 40,
+            angle: 120,
+            spread: 55,
+            origin: { x: 1 }
+          });
+        } catch {
+          // ignore
+        }
       }, 300);
     } catch {
       // Ignore if canvas confetti not supported in environment
     }
   }, []);
 
-  // Core Drop/Placement handler
+  // Core Placement Logic
   const processPlacement = useCallback(
     (strip: SentenceStrip, targetLayerId: LayerId) => {
+      // Always reset dragging state
+      setDraggedStrip(null);
+      setDragOverLayer(null);
+
       // Check if strip is already placed
       if (placedStrips.some((p) => p.id === strip.id)) {
         setStatusMessage('This strip is already placed!');
@@ -153,13 +196,18 @@ export default function App() {
         setPlacedStrips(nextPlaced);
         setBankStrips((prev) => prev.filter((s) => s.id !== strip.id));
         setSelectedStrip(null);
-        setDraggedStrip(null);
 
         // Visual flash on layer
+        if (animTimeoutRef.current) clearTimeout(animTimeoutRef.current);
         setAnimatingLayer({ layerId: targetLayerId, status: 'correct' });
-        setTimeout(() => setAnimatingLayer(null), 600);
+        animTimeoutRef.current = window.setTimeout(() => {
+          setAnimatingLayer(null);
+          animTimeoutRef.current = null;
+        }, 600);
 
-        setStatusMessage(strip.explanation ? `✅ Correct! ${strip.explanation}` : '✅ Correct! Great job!');
+        setStatusMessage(
+          strip.explanation ? `✅ Correct! ${strip.explanation}` : '✅ Correct! Great job!'
+        );
         setStatusType('success');
 
         // Check if finished
@@ -180,9 +228,11 @@ export default function App() {
             return updated;
           });
 
-          setTimeout(() => {
+          if (completionTimeoutRef.current) clearTimeout(completionTimeoutRef.current);
+          completionTimeoutRef.current = window.setTimeout(() => {
             setIsCompleted(true);
             launchCelebration();
+            completionTimeoutRef.current = null;
           }, 600);
         }
       } else {
@@ -191,15 +241,19 @@ export default function App() {
         setMistakes((prev) => prev + 1);
 
         // Visual shake on layer
+        if (animTimeoutRef.current) clearTimeout(animTimeoutRef.current);
         setAnimatingLayer({ layerId: targetLayerId, status: 'wrong' });
-        setTimeout(() => setAnimatingLayer(null), 500);
+        animTimeoutRef.current = window.setTimeout(() => {
+          setAnimatingLayer(null);
+          animTimeoutRef.current = null;
+        }, 500);
 
         // Educational hint based on target layer
         let hint = '';
         if (targetLayerId === 1) {
-          hint = "Layer 1 must be a broad Topic Sentence without raw statistics.";
+          hint = 'Layer 1 must be an overarching Topic Sentence without specific numbers.';
         } else if (targetLayerId === 2) {
-          hint = 'Layer 2 requires specific data figures, percentages, or dates.';
+          hint = 'Layer 2 requires precise statistical figures, values, or percentages.';
         } else if (targetLayerId === 3) {
           hint = 'Layer 3 synthesizes comparative trends (e.g. "in contrast", "doubled", "while").';
         }
@@ -214,8 +268,12 @@ export default function App() {
   // Drag Event Handlers
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, strip: SentenceStrip) => {
     setDraggedStrip(strip);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', strip.id);
+    try {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', strip.id);
+    } catch {
+      // IE/Safari edge case
+    }
   };
 
   const handleDragEnd = () => {
@@ -225,7 +283,11 @@ export default function App() {
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>, layerId: LayerId) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    try {
+      e.dataTransfer.dropEffect = 'move';
+    } catch {
+      // ignore
+    }
     if (dragOverLayer !== layerId) {
       setDragOverLayer(layerId);
     }
@@ -242,17 +304,38 @@ export default function App() {
     e.preventDefault();
     setDragOverLayer(null);
 
-    const stripToPlace = draggedStrip || selectedStrip;
+    let stripToPlace = draggedStrip || selectedStrip;
+
+    // Fallback: lookup strip via dataTransfer if state was somehow cleared
+    if (!stripToPlace) {
+      try {
+        const stripId = e.dataTransfer.getData('text/plain');
+        if (stripId) {
+          stripToPlace = bankStrips.find((s) => s.id === stripId) || null;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     if (stripToPlace) {
       processPlacement(stripToPlace, layerId);
+    } else {
+      setDraggedStrip(null);
     }
   };
 
   // Click/Touch placement
   const handleLayerClick = (layerId: LayerId) => {
-    if (selectedStrip) {
-      processPlacement(selectedStrip, layerId);
+    const stripToPlace = selectedStrip || draggedStrip;
+    if (stripToPlace) {
+      processPlacement(stripToPlace, layerId);
     }
+  };
+
+  // Direct Placement Button from SentenceBank
+  const handlePlaceDirectly = (strip: SentenceStrip, layerId: LayerId) => {
+    processPlacement(strip, layerId);
   };
 
   const handleToggleSound = () => {
@@ -303,7 +386,7 @@ export default function App() {
           {/* Active Topic Header Banner */}
           <div className="mb-6 p-4 sm:p-5 rounded-2xl bg-indigo-50/70 border border-indigo-100/90 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-start gap-3">
-              <span className="text-3xl p-2 bg-white rounded-2xl border border-indigo-100 shrink-0">
+              <span className="text-3xl p-2 bg-white rounded-2xl border border-indigo-100 shrink-0 shadow-2xs">
                 {activeTopic.icon}
               </span>
               <div>
@@ -336,7 +419,7 @@ export default function App() {
             </button>
           </div>
 
-          {/* Cake Stack Mini Progress Bar */}
+          {/* Cake Stack Visualizer */}
           <div className="mb-6">
             <CakeVisualizer
               layerCounts={layerCounts}
@@ -346,7 +429,7 @@ export default function App() {
             />
           </div>
 
-          {/* Main 2-Column Layout */}
+          {/* Main 2-Column Interactive Workspace */}
           <div className="main-layout grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 items-start">
             {/* Left Column: Colorless Sentence Bank */}
             <SentenceBank
@@ -355,6 +438,7 @@ export default function App() {
               onSelectStrip={setSelectedStrip}
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
+              onPlaceDirectly={handlePlaceDirectly}
             />
 
             {/* Right Column: Cake Layers */}
@@ -388,7 +472,7 @@ export default function App() {
             {statusMessage}
           </div>
 
-          {/* Academic IELTS Writing Context Footer */}
+          {/* Academic Context Footer */}
           <footer className="mt-8 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
             <div className="flex items-center gap-1.5">
               <Info className="w-4 h-4 text-slate-400" />
@@ -396,21 +480,24 @@ export default function App() {
             </div>
             <span>Layer 1: Topic Sentences • Layer 2: Specific Figures • Layer 3: Comparisons</span>
           </footer>
+
+          {/* Completion Modal - Only rendered in game view when completed */}
+          {isCompleted && (
+            <CompletionModal
+              isOpen={isCompleted}
+              score={score}
+              mistakes={mistakes}
+              timeSeconds={seconds}
+              placedStrips={placedStrips}
+              topicTitle={activeTopic.title}
+              onPlayAgain={handlePlayAgain}
+              onNextTopic={handleNextTopic}
+              onBackToMenu={handleBackToMenu}
+              onClose={() => setIsCompleted(false)}
+            />
+          )}
         </main>
       )}
-
-      {/* Completion Celebration Modal */}
-      <CompletionModal
-        isOpen={isCompleted}
-        score={score}
-        mistakes={mistakes}
-        timeSeconds={seconds}
-        placedStrips={placedStrips}
-        topicTitle={activeTopic.title}
-        onPlayAgain={handlePlayAgain}
-        onNextTopic={handleNextTopic}
-        onBackToMenu={handleBackToMenu}
-      />
 
       {/* IELTS Chart Prompt & Data Context Modal */}
       {previewModalTopic && (

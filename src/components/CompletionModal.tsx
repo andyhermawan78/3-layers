@@ -1,5 +1,14 @@
 import React, { useState } from 'react';
-import { RotateCcw, Award, BookOpen, Clock, CheckCircle2, AlertCircle, ArrowRight, LayoutGrid } from 'lucide-react';
+import {
+  RotateCcw,
+  BookOpen,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  ArrowRight,
+  LayoutGrid,
+  X
+} from 'lucide-react';
 import { SentenceStrip } from '../types';
 
 interface CompletionModalProps {
@@ -12,6 +21,7 @@ interface CompletionModalProps {
   onPlayAgain: () => void;
   onNextTopic?: () => void;
   onBackToMenu: () => void;
+  onClose?: () => void;
 }
 
 export const CompletionModal: React.FC<CompletionModalProps> = ({
@@ -23,7 +33,8 @@ export const CompletionModal: React.FC<CompletionModalProps> = ({
   topicTitle,
   onPlayAgain,
   onNextTopic,
-  onBackToMenu
+  onBackToMenu,
+  onClose
 }) => {
   const [showFullEssay, setShowFullEssay] = useState(false);
 
@@ -44,11 +55,27 @@ export const CompletionModal: React.FC<CompletionModalProps> = ({
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-fade-in"
       role="dialog"
       aria-modal="true"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && onClose) {
+          onClose();
+        }
+      }}
     >
       <div
         id="modal-card"
-        className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full text-center shadow-2xl border border-slate-100 transform transition-all animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto"
+        className="relative bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full text-center shadow-2xl border border-slate-100 transform transition-all animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto"
       >
+        {/* Close X button */}
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 p-2 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+            aria-label="Close modal"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
+
         {/* Cake celebration graphic */}
         <div className="w-20 h-20 mx-auto mb-3 bg-amber-50 rounded-full flex items-center justify-center border-2 border-amber-200 shadow-inner">
           <span className="text-5xl select-none" role="img" aria-label="birthday cake">
